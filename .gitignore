@@ -25,6 +25,9 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-# Watchdog and src Directory
+# local directories
 watchdog
 watchdog_src/*
+images/*
+db/*
+mountpoints/*
