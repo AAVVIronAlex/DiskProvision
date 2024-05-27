@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script version
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 # Define the name of the virtual environment directory
 VENV_DIR=".DProvVEnv"
@@ -72,6 +72,26 @@ check_apt_package() {
     else
         return 1  # Package does not exist
     fi
+}
+
+check_ensurepip() {
+    # Array of typically installed files from the providing package
+    local files=(
+        "/usr/lib/python3.12/ensurepip/__init__.py"
+        "/usr/lib/python3.12/ensurepip/__main__.py"
+        "/usr/lib/python3.12/ensurepip/_uninstall.py"
+    )
+
+    # Loop through each file and check if it exists
+    for file in "${files[@]}"; do
+        if [ ! -f "$file" ]; then
+            echo "ensurepip is not installed: $file is missing."
+            return 1
+        fi
+    done
+
+    echo "ensurepip is installed."
+    return 0
 }
 
 check_requirements_import() {
@@ -250,6 +270,8 @@ if [[ "$(uname)" == "Linux" ]]; then
         check_qemu_img || install_package "qemu-utils"
 
         check_python_version
+
+        check_ensurepip || install_package "python3.12-venv"
 
         # Check if a virtual environment already exists in the current directory
         if [ -d "$VENV_DIR" ]; then
