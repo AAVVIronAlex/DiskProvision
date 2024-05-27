@@ -14,6 +14,7 @@ import json
 import click
 import string
 import shutil
+import getpass
 import platform
 import subprocess
 
@@ -64,6 +65,20 @@ def host_os_pretty():
             return "Darwin"
     
     return os_type
+
+def get_current_user():
+    """
+    Get the username of the currently active user running the Python script.
+
+    This function uses the getpass module to retrieve the login name of the user.
+    It checks the environment variables LOGNAME, USER, LNAME, and USERNAME in order,
+    and returns the value of the first non-empty string.
+
+    Returns:
+        str: The username of the currently active user.
+    """
+    username = getpass.getuser()
+    return username
 
 def get_current_directory():
     """Gets the current working directory and returns it"""
@@ -290,47 +305,67 @@ def mount_image(image_path):
                 print(f"Connected {image_name} to /dev/{nbd_device}")
 
             # Probe the connected nbd device for partitions, if none exist, we cannot continue
-            nbd_device_info = get_nbd_device_info(nbd_device)
-            if nbd_device_info:
+            partition_count = get_nbd_device_partition_count(nbd_device)
+
+            if DEBUG.upper() == "TRUE":
+                print(f"Probing NBD Device: {nbd_device}")
+                print(f"Number of Partitions found: {partition_count}")
+
+            # Check if the NBD device has 0 partitions
+            if partition_count == 0:
+                print("Cannot mount... The selected image has 0 partitions. Have you formatted it yet?")
+
+                # Remove created Mount Point directory for clean up
                 if DEBUG.upper() == "TRUE":
-                    print(f"Device: {nbd_device_info['device']}")
-                    print(f"Size: {nbd_device_info['size']}")
-                    print(f"Mount Point: {nbd_device_info['mount_point']}")
-                    print(f"Number of Partitions: {nbd_device_info['total_partitions']}")
-                    print(f"Partitions: {', '.join(nbd_device_info['partitions']) if nbd_device_info['partitions'] else 'None'}")
+                    print("Removing Mount Directory for clean up...")
+                ensure_directory_exists_destructive(img_mnt_path)
 
-                # Check if the NBD device has 0 partitions
-                if nbd_device_info['total_partitions'] == 0:
-                    print("Cannot mount... The selected image has 0 partitions. Have you formatted it yet?")
+                # Disconnect image from NBD Device for clean up
+                if DEBUG.upper() == "TRUE":
+                    print("Disconnecting the NBD device...")
 
-                    # Remove created Mount Point directory for clean up
-                    if DEBUG.upper() == "TRUE":
-                        print("Removing Mount Directory for clean up...")
-                    ensure_directory_exists_destructive(img_mnt_path)
+                # Build the disconnect_nbd_command for the NBD device
+                disconnect_nbd_command = f"sudo qemu-nbd --disconnect /dev/{nbd_device}"
 
-                    # Disconnect image from NBD Device for clean up
-                    if DEBUG.upper() == "TRUE":
-                        print("Disconnecting the NBD device...")
-
-                    # Build the disconnect_nbd_command for the NBD device
-                    disconnect_nbd_command = f"sudo qemu-nbd --disconnect /dev/{nbd_device}"
-
-                    # Execute the command
-                    if DEBUG.upper() == "TRUE":
-                        subprocess.run(disconnect_nbd_command, shell=True)
-                    else:
-                        subprocess.run(disconnect_nbd_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-                    if DEBUG.upper() == "TRUE":
-                        print("Successfully cleaned up. Returning to Main Menu...")
-
-                    return
+                # Execute the command
+                if DEBUG.upper() == "TRUE":
+                    subprocess.run(disconnect_nbd_command, shell=True)
                 else:
-                    # Continue with further actions
-                    if DEBUG.upper() == "TRUE":
-                        print("The selected image has valid partitions. Continuing...")
+                    subprocess.run(disconnect_nbd_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                if DEBUG.upper() == "TRUE":
+                    print("Successfully cleaned up. Returning to Main Menu...")
+
+                return
+            elif partition_count == 1:
+                # Continue with further actions
+                if DEBUG.upper() == "TRUE":
+                    print("The selected image has a valid partition. Continuing...")
             else:
-                print("Failed to get NBD device information. Exiting...")
+                # Placeholder for handling more than 1 partition
+                print("More than 1 partition found. Exiting for now...")
+
+                # Remove created Mount Point directory for clean up
+                if DEBUG.upper() == "TRUE":
+                    print("Removing Mount Directory for clean up...")
+                ensure_directory_exists_destructive(img_mnt_path)
+
+                # Disconnect image from NBD Device for clean up
+                if DEBUG.upper() == "TRUE":
+                    print("Disconnecting the NBD device...")
+
+                # Build the disconnect_nbd_command for the NBD device
+                disconnect_nbd_command = f"sudo qemu-nbd --disconnect /dev/{nbd_device}"
+
+                # Execute the command
+                if DEBUG.upper() == "TRUE":
+                    subprocess.run(disconnect_nbd_command, shell=True)
+                else:
+                    subprocess.run(disconnect_nbd_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                if DEBUG.upper() == "TRUE":
+                    print("Successfully cleaned up. Returning to Main Menu...")
+
                 return
 
             # Mount the nbd device to the image mount path directory with desired ownership
@@ -435,58 +470,9 @@ def format_image(image_path):
 
                     # Print variable holding chosen image path
                     print("Chosen Image Path:", image_path)
-
-                    # Check if nbd module is loaded, if not, load it
-                    check_and_load_nbd_module()
-
-                    # Get the next available nbd device to use
-                    next_nbd = get_next_available_nbd()
-                    if next_nbd:
-                        if DEBUG.upper() == "TRUE":
-                            print(f"The next available NBD device is: {next_nbd}")
-
-                        # Retrieve a name to use for partition name
-                        image_name = extract_image_name_for_fat(image_path)
-                        if DEBUG.upper() == "TRUE":
-                            print("FAT16 Partition Name Generated:", image_name)
-
-                        # Detect the image format to use in the connect_command
-                        image_format = detect_image_format(image_path)
-                        if DEBUG.upper() == "TRUE":
-                            print("Image format detected as:", image_format)
-                        
-                        # Build the connect_command to connect the image file to the next available nbd device
-                        connect_command = f"sudo qemu-nbd --connect=/dev/{next_nbd} -f {image_format} {image_path}"
-                        if DEBUG.upper() == "TRUE":
-                            print("Built Connect Command:", connect_command)
-
-                        # Execute the command
-                        if DEBUG.upper() == "TRUE":
-                            subprocess.run(connect_command, shell=True)
-                        else:
-                            subprocess.run(connect_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-                        print("Successfully connected image to:", next_nbd)
-
-                        # Build the format_command to format the mounted image with FAT32 filesystem and the specified name
-                        format_command = f"sudo mkfs.fat -F 16 -n \"{image_name}\" -I /dev/{next_nbd}"
-
-                        # Execute the command
-                        if DEBUG.upper() == "TRUE":
-                            subprocess.run(format_command, shell=True)
-                        else:
-                            subprocess.run(format_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-                        # Build the unmount_command for the image on the NBD device
-                        unmount_command = f"sudo qemu-nbd --disconnect /dev/{next_nbd}"
-
-                        # Execute the command
-                        if DEBUG.upper() == "TRUE":
-                            subprocess.run(unmount_command, shell=True)
-                        else:
-                            subprocess.run(unmount_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-                        print("Successfully formatted as FAT16!")
+                    
+                    # Placeholder code for now.
+                    print("FAT16 formatting is currently unavailable... Exiting.")
 
                 elif fat_choice == "2":
                     print("Continuing for FAT32 choice...")
@@ -494,12 +480,16 @@ def format_image(image_path):
                     # Print variable holding chosen image path
                     print("Chosen Image Path:", image_path)
 
-                    # Check if nbd module is loaded, if not, load it
-                    check_and_load_nbd_module()
+                    try:
+                        # Check if nbd module is loaded, if not, load it
+                        check_and_load_nbd_module()
 
-                    # Get the next available nbd device to use
-                    next_nbd = get_next_available_nbd()
-                    if next_nbd:
+                        # Get the next available nbd device to use
+                        next_nbd = get_next_available_nbd()
+                        if not next_nbd:
+                            print("No available NBD devices found.")
+                            return
+
                         if DEBUG.upper() == "TRUE":
                             print(f"The next available NBD device is: {next_nbd}")
 
@@ -535,6 +525,32 @@ def format_image(image_path):
                         else:
                             subprocess.run(format_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+                        # Check the number of partitions after formatting
+                        partition_count = get_nbd_device_partition_count(next_nbd)
+                        retry_count = 0
+                        max_retries = 3
+
+                        while partition_count == 0 and retry_count < max_retries:
+                            print("Formatting failed. Retrying...")
+                            if DEBUG.upper() == "TRUE":
+                                subprocess.run(format_command, shell=True)
+                            else:
+                                subprocess.run(format_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                            partition_count = get_nbd_device_partition_count(next_nbd)
+                            retry_count += 1
+
+                        if partition_count == 0:
+                            print("Failed to format the image after multiple attempts.")
+                            raise Exception("Formatting failed")
+
+                        if partition_count > 1:
+                            print("More than 1 partition found. Exiting for now.")
+                            raise Exception("Multiple partitions found")
+
+                        if DEBUG.upper() == "TRUE":
+                            print("The selected image has a valid partition. Continuing...")
+
                         # Build the unmount_command for the image on the NBD device
                         unmount_command = f"sudo qemu-nbd --disconnect /dev/{next_nbd}"
 
@@ -546,8 +562,15 @@ def format_image(image_path):
 
                         print("Successfully formatted as FAT32!")
 
-                    else:
-                        print("No available NBD devices found.")
+                    except Exception as e:
+                        print(f"Error: {e}")
+                        # Ensure clean-up even in case of failure
+                        if next_nbd:
+                            unmount_command = f"sudo qemu-nbd --disconnect /dev/{next_nbd}"
+                            if DEBUG.upper() == "TRUE":
+                                subprocess.run(unmount_command, shell=True)
+                            else:
+                                subprocess.run(unmount_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                 else:
                     print("Invalid input. Please enter either 1 or 2.")
@@ -886,6 +909,33 @@ def get_nbd_device_info(nbd_device):
         print(f"Error executing command: {e}")
         return {}
 
+def get_nbd_device_partition_count(nbd_device):
+    """
+    Get the number of partitions for an nbd device.
+    
+    Parameters:
+        nbd_device (str): The name of the nbd device (e.g., 'nbd2').
+    
+    Returns:
+        int: The number of partitions on the nbd device.
+    """
+    try:
+        # Execute the lsblk command to get detailed information about the nbd device
+        lsblk_output = subprocess.check_output(['lsblk', '-o', 'NAME,SIZE,TYPE,MOUNTPOINT', f'/dev/{nbd_device}', '--json'], text=True)
+        
+        # Convert the JSON output to a dictionary
+        lsblk_info = json.loads(lsblk_output)
+        
+        # Check if the device has partitions
+        if 'children' in lsblk_info['blockdevices'][0]:
+            partitions = lsblk_info['blockdevices'][0]['children']
+            return len(partitions)
+        else:
+            return 0
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing command: {e}")
+        return 0
+
 def get_supported_mkfs_commands():
     """
     Get supported mkfs commands on the system.
@@ -980,12 +1030,12 @@ def main():
         click.clear()
         click.echo("Welcome to DiskProvision!")
         click.echo("Copyright (c) 2024 RoyalGraphX")
-        click.echo(f"Python x86_64 Pre-Release 0.5.6 for {host_os_pretty()}\n")
+        click.echo(f"Python x86_64 Pre-Release 0.5.12 for {host_os_pretty()}\n")
         click.echo("What would you like to do?")
         click.echo("1. Create a new blank disk image")
         click.echo("2. Manage existing disk images")
         if get_host_os() == "Linux":
-            click.echo("3. Create an OpenCore disk image")
+            click.echo("3. Create an OpenCore type disk image")
         if get_host_os() == "Darwin":
             click.echo("3. Unmount a disk image")
             click.echo("4. Exit")
@@ -1164,21 +1214,25 @@ def create_oc_image():
     click.clear()
 
     if DEBUG.upper() == "TRUE":
-        click.echo("Creating an OpenCore disk image...")
+        click.echo("Creating an OpenCore type disk image...")
 
-    # Check if nbd module is loaded, if not, load it
-    check_and_load_nbd_module()
+    try:
+        # Check if nbd module is loaded, if not, load it
+        check_and_load_nbd_module()
 
-    # Get the next available nbd device to use
-    next_nbd = get_next_available_nbd()
-    if next_nbd:
+        # Get the next available nbd device to use
+        next_nbd = get_next_available_nbd()
+        if not next_nbd:
+            print("No available NBD devices found.")
+            return
+
         if DEBUG.upper() == "TRUE":
             print(f"The next available NBD device is: {next_nbd}")
 
-        # We can use create_disk_image_octype to handle the creation of a special image
+        # Create an OC Type image
         create_disk_image_octype()
 
-        # Define variables for rest of process
+        # Define variables for the rest of the process
         current_directory = get_current_directory()
         db_path = os.path.join(current_directory, DB_FOLDER)
         ensure_directory_exists(db_path)
@@ -1187,16 +1241,15 @@ def create_oc_image():
         if DEBUG.upper() == "TRUE":
             click.echo(f"Current directory: {current_directory}")
             click.echo(f"Database folder: {relative_images_path}")
-        
+
         image_path = get_latest_modified_file(relative_images_path)
         if DEBUG.upper() == "TRUE":
             print("Latest modified file:", image_path)
 
-        # Build the connect_command to connect the image file to the next available nbd device
+        # Connect the image file to the next available NBD device
         connect_command = f"sudo qemu-nbd --connect=/dev/{next_nbd} -f raw {image_path}"
-
-        # Execute the command
         if DEBUG.upper() == "TRUE":
+            click.echo(f"Connect Command: {connect_command}")
             subprocess.run(connect_command, shell=True)
         else:
             subprocess.run(connect_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1205,26 +1258,58 @@ def create_oc_image():
         if DEBUG.upper() == "TRUE":
             print("FAT32 Partition Name Generated:", image_name)
 
-        # Build the format_command to format the mounted image with FAT32 filesystem and the specified name
+        # Format the mounted image with FAT32 filesystem and the specified name
         format_command = f"sudo mkfs.fat -F 32 -n \"{image_name}\" -I /dev/{next_nbd}"
-
-        # Execute the command
         if DEBUG.upper() == "TRUE":
+            click.echo(f"Format Command: {format_command}")
             subprocess.run(format_command, shell=True)
         else:
             subprocess.run(format_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Build the disconnect_command for the image on the NBD device
-        disconnect_command = f"sudo qemu-nbd --disconnect /dev/{next_nbd}"
+        # Check the number of partitions after formatting
+        partition_count = get_nbd_device_partition_count(next_nbd)
+        retry_count = 0
+        max_retries = 3
 
-        # Execute the command
+        while partition_count == 0 and retry_count < max_retries:
+            print("Formatting failed. Retrying...")
+            if DEBUG.upper() == "TRUE":
+                subprocess.run(format_command, shell=True)
+            else:
+                subprocess.run(format_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            partition_count = get_nbd_device_partition_count(next_nbd)
+            retry_count += 1
+
+        if partition_count == 0:
+            print("Failed to format the image after multiple attempts.")
+            raise Exception("Formatting failed")
+
+        if partition_count > 1:
+            print("More than 1 partition found. Something went wrong.")
+            raise Exception("Multiple partitions found")
+
         if DEBUG.upper() == "TRUE":
-            subprocess.run(disconnect_command, shell=True)
-        else:
-            subprocess.run(disconnect_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("The selected image has a valid partition. Continuing...")
 
+    except Exception as e:
+        print(f"Error: {e}")
+        # Ensure clean-up even in case of failure
+        if next_nbd:
+            disconnect_command = f"sudo qemu-nbd --disconnect /dev/{next_nbd}"
+            if DEBUG.upper() == "TRUE":
+                subprocess.run(disconnect_command, shell=True)
+            else:
+                subprocess.run(disconnect_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+
+    # Disconnect the NBD device after successful operations
+    print(f"Successfully formatted {image_name} on /dev/{next_nbd}")
+    disconnect_command = f"sudo qemu-nbd --disconnect /dev/{next_nbd}"
+    if DEBUG.upper() == "TRUE":
+        subprocess.run(disconnect_command, shell=True)
     else:
-        print("No available NBD devices found.")
+        subprocess.run(disconnect_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def unmount_disk_image():
     click.clear()
@@ -1363,7 +1448,10 @@ def unmount_disk_image():
         disk_lines = [line for line in ls_output.stdout.split('\n') if line.startswith('brw') or line.startswith('w-')]
         
         # Step 3: Further filter output to only include disks owned by the user
-        user_disks = [line.split()[-1] for line in disk_lines if line.split()[2] == 'royalgraphx']
+        current_user = get_current_user()
+        if DEBUG.upper() == "TRUE":
+            print(f"The current user is: {current_user}")
+        user_disks = [line.split()[-1] for line in disk_lines if line.split()[2] == current_user]
         
         if DEBUG.upper() == "TRUE":
             print("User disks:")
