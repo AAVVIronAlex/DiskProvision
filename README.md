@@ -2,7 +2,7 @@
   <img width="650" height="200" src="assets/HeaderDiskProvision.png">
 </p>
 
-<h1 align="center">Python Pre-Release Version 0.5.6</h1>
+<h1 align="center">Python Pre-Release Version 0.5.12</h1>
 <h4 align="center">A virtual disk management tool for multiple OS's with unique application support.</h4>
 
 ## About
@@ -33,8 +33,8 @@ DiskProvision automates the process of managing disk images for use with various
 * Packages/Dependencies:
   * Python 3.9+ (Usually provided by default)
   * mkfs.fat (usually provided by dosfstools)
-  * qemu-img (usually provided by qemu-utils)
-  * qemu-nbd (usually provided by qemu-utils)
+  * qemu-img (usually provided by qemu-utils or qemu-img)
+  * qemu-nbd (usually provided by qemu-utils or qemu-img)
 
 ## Showcase
 
