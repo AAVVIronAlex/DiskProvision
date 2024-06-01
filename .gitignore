@@ -26,9 +26,9 @@ Temporary Items
 .apdisk
 
 # local directories
-.DProvVenv
 watchdog
 watchdog_src/*
 images/*
 db/*
 mountpoints/*
+.DProvVEnv/*

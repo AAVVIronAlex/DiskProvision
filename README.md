@@ -2,7 +2,7 @@
   <img width="650" height="200" src="assets/HeaderDiskProvision.png">
 </p>
 
-<h1 align="center">Python Pre-Release Version 0.5.12</h1>
+<h1 align="center">Python Pre-Release Version 0.6.3</h1>
 <h4 align="center">A virtual disk management tool for multiple OS's with unique application support.</h4>
 
 ## About
