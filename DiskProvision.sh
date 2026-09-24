@@ -120,6 +120,8 @@ install_package() {
         sudo pacman -S "$1" --noconfirm || { echo "Failed to install $1"; exit 1; }
     elif [ -f /etc/debian_version ]; then
         sudo apt-get install -y "$1" || { echo "Failed to install $1"; exit 1; }
+    elif [ -f /etc/gentoo-release ] || command -v emerge >/dev/null 2>&1; then
+        sudo emerge --oneshot "$1" || { echo "Failed to install $1"; exit 1; }
     else
         echo "Unsupported Linux distribution."
         exit 1
@@ -157,6 +159,13 @@ package_exists() {
             install_package "python3-$1"
         else
             echo "python3-$1 is installed."
+        fi
+    elif [ -f /etc/gentoo-release ] || command -v emerge >/dev/null 2>&1; then
+        if ! ls -d /var/db/pkg/dev-python/"$1"-* >/dev/null 2>&1; then
+            echo "dev-python/$1 is not installed. Installing..."
+            install_package "dev-python/$1"
+        else
+            echo "dev-python/$1 is installed."
         fi
     else
         echo "Unsupported Linux distribution."
@@ -291,6 +300,52 @@ if [[ "$(uname)" == "Linux" ]]; then
                 exit 1
             fi
         fi
+
+        # Check if all modules can be imported and handle failure if necessary
+        check_pip
+        check_requirements_import
+        if [ $? -ne 0 ]; then
+            install_requirements_pip
+        fi
+
+        elif [ -f /etc/gentoo-release ] || command -v emerge >/dev/null 2>&1; then
+            # Gentoo Linux commands or tasks
+            echo "Running on Gentoo Linux..."
+
+            # Check and install dosfstools
+            check_mkfs_fat || install_package "sys-fs/dosfstools"
+
+            # Check qemu-nbd and qemu-img (provided by app-emulation/qemu)
+            check_qemu_nbd || install_package "app-emulation/qemu"
+            check_qemu_img || install_package "app-emulation/qemu"
+
+            check_python_version
+
+            # Gentoo includes venv in dev-lang/python, but verify ensurepip functionality
+            check_ensurepip || {
+                echo "Error: Python ensurepip/venv module is missing."
+                echo "Ensure your dev-lang/python package is compiled with the 'ensurepip' USE flag."
+                exit 1
+            }
+
+            # Check if a virtual environment already exists in the current directory
+            if [ -d "$VENV_DIR" ]; then
+                echo "Virtual environment '$VENV_DIR' already exists."
+                activate_venv "$VENV_DIR"
+            else
+                # Create the virtual environment
+                echo "Creating virtual environment '$VENV_DIR'."
+                $(python_executable) -m venv "$VENV_DIR"
+
+                # Check if the virtual environment was created successfully
+                if [ -d "$VENV_DIR" ]; then
+                    echo "Virtual environment '$VENV_DIR' created successfully."
+                    activate_venv "$VENV_DIR"
+                else
+                    echo "Failed to create virtual environment '$VENV_DIR'."
+                    exit 1
+                fi
+            fi
 
         # Check if all modules can be imported and handle failure if necessary
         check_pip
